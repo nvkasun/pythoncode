@@ -57,10 +57,6 @@ def normalize_env(value):
 
 
 def get_value(row, column_name):
-    """
-    Safely get a column value from Results.csv.
-    Converts empty and '-' values into empty string.
-    """
     value = clean_text(row.get(column_name, ""))
 
     if not value or value == "-":
@@ -70,10 +66,6 @@ def get_value(row, column_name):
 
 
 def parse_json_value(raw_value):
-    """
-    Safely parse JSON value from CSV cell.
-    Handles escaped quotes from AWS Config CSV exports.
-    """
     raw_value = clean_text(raw_value)
 
     if not raw_value or raw_value == "-":
@@ -88,10 +80,6 @@ def parse_json_value(raw_value):
 
 
 def parse_configuration(configuration_value):
-    """
-    Parse full configuration JSON column.
-    Used to extract fields that may not exist as separate CSV columns.
-    """
     parsed = parse_json_value(configuration_value)
 
     if isinstance(parsed, dict):
@@ -102,10 +90,12 @@ def parse_configuration(configuration_value):
 
 def parse_tags(tags_value):
     """
-    Convert tags column into a dictionary:
+    Convert tags column into a dictionary.
+
+    Example:
       Environment -> dev
       BusinessUnitOwner -> MichaelJoelDeGroot
-      Name -> cluster-xxx-dev
+      project -> cdp-foundations-uat
     """
 
     tags_value = clean_text(tags_value)
@@ -155,6 +145,76 @@ def parse_tags(tags_value):
     return tag_dict
 
 
+def get_tag_value(tag_dict, key_name):
+    """
+    Get tag value case-insensitively.
+
+    Example:
+      project
+      Project
+      PROJECT
+    """
+
+    key_name_lower = clean_text(key_name).lower()
+
+    for key, value in tag_dict.items():
+        if clean_text(key).lower() == key_name_lower:
+            return clean_text(value)
+
+    return ""
+
+
+def extract_project_from_config_tag_list(config_dict):
+    """
+    Extract project from configuration.tagList if available.
+
+    Example:
+      "tagList": [
+        {"key": "project", "value": "cdp-foundations-uat"}
+      ]
+    """
+
+    tag_list = config_dict.get("tagList", [])
+
+    if not isinstance(tag_list, list):
+        return ""
+
+    for tag in tag_list:
+        if not isinstance(tag, dict):
+            continue
+
+        key = clean_text(tag.get("key", ""))
+        value = clean_text(tag.get("value", ""))
+
+        if key.lower() == "project" and value:
+            return value
+
+    return ""
+
+
+def decide_account_name_from_project(tag_dict, config_dict):
+    """
+    Account Name comes only from project tag.
+
+    Priority:
+      1. tags column -> project
+      2. configuration.tagList -> project
+      3. Not Found
+    """
+
+    project = get_tag_value(tag_dict, "project")
+
+    if project:
+        return project
+
+    project = extract_project_from_config_tag_list(config_dict)
+
+    if project:
+        return project
+
+    return "Not Found"
+
+
 def extract_env_from_resource_name(resource_name):
     name = clean_text(resource_name).lower()
 
@@ -198,10 +258,6 @@ def decide_env(resource_name, tag_dict):
 
 
 def extract_first_cluster_member_identifier(dbcluster_members_value):
-    """
-    Try to extract first dbinstanceIdentifier from configuration.dbclusterMembers.
-    """
-
     dbcluster_members_value = clean_text(dbcluster_members_value)
 
     if not dbcluster_members_value or dbcluster_members_value == "-":
@@ -243,9 +299,6 @@ def extract_first_cluster_member_identifier(dbcluster_members_value):
 
 
 def decide_db_type(row, config_dict):
-    """
-    DB Type comes from configuration.engine.
-    """
     engine = get_value(row, "configuration.engine")
 
     if engine:
@@ -260,9 +313,6 @@ def decide_db_type(row, config_dict):
 
 
 def decide_engine(row, config_dict):
-    """
-    engine comes from configuration.engine.
-    """
     engine = get_value(row, "configuration.engine")
 
     if engine:
@@ -311,12 +361,6 @@ def decide_db_identifier(row):
 
 
 def decide_db_name(row, config_dict):
-    """
-    DB Name priority:
-      1. configuration.databaseName direct column, if present
-      2. databaseName from full configuration JSON
-      3. Not Found
-    """
     db_name = get_value(row, "configuration.databaseName")
 
     if db_name:
@@ -331,12 +375,6 @@ def decide_db_name(row, config_dict):
 
 
 def decide_master_user(row, config_dict):
-    """
-    MasterUser priority:
-      1. configuration.masterUsername direct column
-      2. masterUsername from full configuration JSON
-      3. Not Found
-    """
     master_user = get_value(row, "configuration.masterUsername")
 
     if master_user:
@@ -351,12 +389,6 @@ def decide_master_user(row, config_dict):
 
 
 def decide_db_version(row, config_dict):
-    """
-    DB Version priority:
-      1. configuration.engineVersion direct column
-      2. engineVersion from full configuration JSON
-      3. Not Found
-    """
     db_version = get_value(row, "configuration.engineVersion")
 
     if db_version:
@@ -371,13 +403,6 @@ def decide_db_version(row, config_dict):
 
 
 def decide_cloudwatch(row, config_dict):
-    """
-    CloudWatch priority:
-      1. configuration.enabledCloudwatchLogsExports direct column
-      2. enabledCloudwatchLogsExports from full configuration JSON
-      3. Not Found
-    """
-
     cloudwatch = get_value(row, "configuration.enabledCloudwatchLogsExports")
 
     if cloudwatch:
@@ -406,12 +431,6 @@ def decide_cloudwatch(row, config_dict):
 
 
 def decide_backup_retention(row, config_dict):
-    """
-    Backup Retention priority:
-      1. configuration.backupRetentionPeriod direct column
-      2. backupRetentionPeriod from full configuration JSON
-      3. Not Found
-    """
     backup_retention = get_value(row, "configuration.backupRetentionPeriod")
 
     if backup_retention:
@@ -426,12 +445,6 @@ def decide_backup_retention(row, config_dict):
 
 
 def decide_maintenance_window(row, config_dict):
-    """
-    Maintenance Window priority:
-      1. configuration.preferredMaintenanceWindow direct column
-      2. preferredMaintenanceWindow from full configuration JSON
-      3. Not Found
-    """
     maintenance_window = get_value(row, "configuration.preferredMaintenanceWindow")
 
     if maintenance_window:
@@ -446,15 +459,6 @@ def decide_maintenance_window(row, config_dict):
 
 
 def decide_endpoint(row, config_dict):
-    """
-    EndPoint priority:
-      1. configuration.endpoint.address
-      2. configuration.endpoint.value
-      3. endpoint.address from full configuration JSON
-      4. endpoint.value from full configuration JSON
-      5. Not Found
-    """
-
     endpoint = get_value(row, "configuration.endpoint.address")
 
     if endpoint:
@@ -482,15 +486,6 @@ def decide_endpoint(row, config_dict):
 
 
 def decide_port(row, config_dict):
-    """
-    Port priority:
-      1. configuration.endpoint.port
-      2. configuration.port
-      3. endpoint.port from full configuration JSON
-      4. port from full configuration JSON
-      5. Not Found
-    """
-
     port = get_value(row, "configuration.endpoint.port")
 
     if port:
@@ -518,15 +513,6 @@ def decide_port(row, config_dict):
 
 
 def get_column_name(fieldnames, possible_names):
-    """
-    Flexible header matcher.
-    Example:
-      Account Number
-      account number
-      AccountNumber
-      account_id
-    """
-
     normalized_lookup = {
         normalize_header(header): header
         for header in fieldnames
@@ -545,10 +531,10 @@ def load_account_map():
     """
     Loads AccountMap.csv.
 
-    Supports headers like:
-      Account Name,Account Number,Account owner
-      accountName,accountId,accountOwner
-      Name,AccountId,Owner
+    We are no longer using AccountMap.csv for Account Name.
+    Account Name now comes only from project tag.
+
+    AccountMap.csv is still useful for Account Number / Account owner fallback.
     """
 
     map_path = Path(ACCOUNT_MAP_FILE)
@@ -580,12 +566,6 @@ def load_account_map():
         for h in reader.fieldnames:
             print(f"  - [{h}]")
 
-        account_name_col = get_column_name(reader.fieldnames, [
-            "Account Name",
-            "accountName",
-            "Name",
-        ])
-
         account_number_col = get_column_name(reader.fieldnames, [
             "Account Number",
             "AccountNumber",
@@ -604,7 +584,6 @@ def load_account_map():
         ])
 
         print("\nDetected AccountMap columns:")
-        print(f"  Account Name   -> {account_name_col}")
         print(f"  Account Number -> {account_number_col}")
         print(f"  Account owner  -> {account_owner_col}")
 
@@ -619,11 +598,9 @@ def load_account_map():
             if not account_number_key:
                 continue
 
-            account_name = clean_text(row.get(account_name_col, "")) if account_name_col else ""
             account_owner = clean_text(row.get(account_owner_col, "")) if account_owner_col else ""
 
             account_map[account_number_key] = {
-                "Account Name": account_name or "Not Found",
                 "Account Number": account_number_raw or "Not Found",
                 "Account owner": account_owner or "Not Found",
             }
@@ -670,11 +647,14 @@ def main():
             "configuration.enabledCloudwatchLogsExports",
             "configuration.backupRetentionPeriod",
             "configuration.preferredMaintenanceWindow",
+            "resourceId",
+        ]
+
+        optional_columns = [
             "configuration.endpoint.address",
             "configuration.endpoint.value",
             "configuration.endpoint.port",
             "configuration.port",
-            "resourceId",
         ]
 
         missing = [col for col in required_columns if col not in reader.fieldnames]
@@ -689,6 +669,14 @@ def main():
                 print(f"  - {h}")
 
             sys.exit(1)
+
+        missing_optional = [col for col in optional_columns if col not in reader.fieldnames]
+
+        if missing_optional:
+            print("\nWARNING: Optional endpoint/port columns missing in Results.csv:")
+            for col in missing_optional:
+                print(f"  - {col}")
+            print("The script will try to extract endpoint/port from full configuration JSON instead.")
 
         with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as outfile:
             writer = csv.writer(outfile)
@@ -730,6 +718,9 @@ def main():
 
                 env = decide_env(resource_name, tag_dict)
 
+                # Account Name now comes only from project tag
+                account_name = decide_account_name_from_project(tag_dict, config_dict)
+
                 db_type = decide_db_type(row, config_dict)
                 db_identifier = decide_db_identifier(row)
                 engine = decide_engine(row, config_dict)
@@ -747,12 +738,10 @@ def main():
 
                 if account_details:
                     matched_count += 1
-                    account_name = account_details["Account Name"]
                     account_number = account_details["Account Number"]
                     account_owner_from_map = account_details["Account owner"]
                 else:
                     unmatched_count += 1
-                    account_name = "Not Found"
                     account_number = account_id_raw
                     account_owner_from_map = "Not Found"
 
