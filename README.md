@@ -110,12 +110,16 @@ def parse_tags(tags_value):
     except json.JSONDecodeError:
         tag_dict = {}
 
+        # Format:
+        # {"key":"Environment","tag":"Environment=dev","value":"dev"}
         matches = re.findall(
             r'"key"\s*:\s*"([^"]+)"\s*,\s*"tag"\s*:\s*"[^"]*"\s*,\s*"value"\s*:\s*"([^"]*)"',
             cleaned,
             re.IGNORECASE,
         )
 
+        # Format:
+        # {"value":"dev","key":"Environment"}
         if not matches:
             matches = re.findall(
                 r'"value"\s*:\s*"([^"]*)"\s*,\s*"key"\s*:\s*"([^"]+)"',
@@ -221,6 +225,7 @@ def extract_env_from_resource_name(resource_name):
     if not name:
         return ""
 
+    # Order matters: preprod before prod
     env_patterns = [
         ("preprod", r"(^|[-_])preprod($|[-_])"),
         ("prod", r"(^|[-_])prod($|[-_])"),
@@ -244,7 +249,7 @@ def decide_env(resource_name, tag_dict):
       3. Not Found
     """
 
-    env_from_tags = normalize_env(tag_dict.get("Environment", ""))
+    env_from_tags = normalize_env(get_tag_value(tag_dict, "Environment"))
 
     if env_from_tags:
         return env_from_tags
@@ -531,10 +536,14 @@ def load_account_map():
     """
     Loads AccountMap.csv.
 
-    We are no longer using AccountMap.csv for Account Name.
-    Account Name now comes only from project tag.
+    Account Name is NOT taken from AccountMap.csv.
+    Account Name now comes only from:
+      1. tags -> project
+      2. configuration.tagList -> project
 
-    AccountMap.csv is still useful for Account Number / Account owner fallback.
+    AccountMap.csv is still useful for:
+      Account Number
+      Account owner fallback
     """
 
     map_path = Path(ACCOUNT_MAP_FILE)
@@ -718,7 +727,9 @@ def main():
 
                 env = decide_env(resource_name, tag_dict)
 
-                # Account Name now comes only from project tag
+                # Account Name comes only from project:
+                # 1. tags column -> project
+                # 2. configuration.tagList -> project
                 account_name = decide_account_name_from_project(tag_dict, config_dict)
 
                 db_type = decide_db_type(row, config_dict)
@@ -745,7 +756,7 @@ def main():
                     account_number = account_id_raw
                     account_owner_from_map = "Not Found"
 
-                account_owner_from_tags = clean_text(tag_dict.get("BusinessUnitOwner", ""))
+                account_owner_from_tags = get_tag_value(tag_dict, "BusinessUnitOwner")
 
                 if account_owner_from_map != "Not Found":
                     final_account_owner = account_owner_from_map
