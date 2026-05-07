@@ -6,19 +6,39 @@ import re
 import sys
 from pathlib import Path
 
-# =====================================================
-# Configuration
-# =====================================================
 INPUT_FILE = "Results.csv"
 ACCOUNT_MAP_FILE = "AccountMap.csv"
 OUTPUT_FILE = "Final_Records.csv"
 
 
-def normalize_env(value: str) -> str:
-    if not value:
+def clean_text(value):
+    if value is None:
         return ""
 
-    value = value.strip().lower()
+    return (
+        str(value)
+        .replace("\ufeff", "")
+        .replace("\xa0", " ")
+        .replace("\r", "")
+        .replace("\n", "")
+        .strip()
+    )
+
+
+def normalize_account_number(value):
+    """
+    Convert account number to digits only for matching.
+
+    Example:
+    5716-0086-7023 -> 571600867023
+    571600867023   -> 571600867023
+    """
+    value = clean_text(value)
+    return re.sub(r"\D", "", value)
+
+
+def normalize_env(value):
+    value = clean_text(value).lower()
 
     mapping = {
         "production": "prod",
@@ -36,11 +56,11 @@ def normalize_env(value: str) -> str:
     return mapping.get(value, value)
 
 
-def extract_env_from_resource_name(resource_name: str) -> str:
-    if not resource_name:
-        return ""
+def extract_env_from_resource_name(resource_name):
+    name = clean_text(resource_name).lower()
 
-    name = resource_name.lower().strip()
+    if not name:
+        return ""
 
     # Order matters: preprod before prod
     env_patterns = [
@@ -58,13 +78,10 @@ def extract_env_from_resource_name(resource_name: str) -> str:
     return ""
 
 
-def extract_env_from_tags(tags_value: str) -> str:
-    if not tags_value:
-        return ""
+def extract_env_from_tags(tags_value):
+    tags_value = clean_text(tags_value)
 
-    tags_value = tags_value.strip()
-
-    if tags_value in ["", "-"]:
+    if not tags_value or tags_value == "-":
         return ""
 
     cleaned = tags_value.replace('\\"', '"')
@@ -72,7 +89,6 @@ def extract_env_from_tags(tags_value: str) -> str:
     try:
         tags = json.loads(cleaned)
     except json.JSONDecodeError:
-        # Fallback if tags JSON parsing fails
         match = re.search(
             r'"key"\s*:\s*"Environment".*?"value"\s*:\s*"([^"]+)"',
             cleaned,
@@ -98,21 +114,20 @@ def extract_env_from_tags(tags_value: str) -> str:
         if not isinstance(tag, dict):
             continue
 
-        key = str(tag.get("key", "")).strip().lower()
+        key = clean_text(tag.get("key", "")).lower()
 
         if key == "environment":
-            value = str(tag.get("value", "")).strip()
-            return normalize_env(value)
+            return normalize_env(tag.get("value", ""))
 
     return ""
 
 
-def decide_env(resource_name: str, tags_value: str) -> str:
+def decide_env(resource_name, tags_value):
     """
     Priority:
-      1. Environment tag
-      2. resourceName
-      3. Not Found
+    1. tags.Environment
+    2. resourceName
+    3. Not Found
     """
     env_from_tags = extract_env_from_tags(tags_value)
     env_from_name = extract_env_from_resource_name(resource_name)
@@ -126,19 +141,15 @@ def decide_env(resource_name: str, tags_value: str) -> str:
     return "Not Found"
 
 
-def load_account_map() -> dict:
-    """
-    Load account mapping from AccountMap.csv.
+def normalize_headers(fieldnames):
+    return [clean_text(header) for header in fieldnames]
 
-    Expected headers:
-      Account Name,Account Number,Account owner
-    """
 
+def load_account_map():
     map_path = Path(ACCOUNT_MAP_FILE)
 
     if not map_path.exists():
-        print(f"Warning: {ACCOUNT_MAP_FILE} not found.")
-        print("Account details will be marked as 'Not Found'.")
+        print(f"Warning: {ACCOUNT_MAP_FILE} not found in {Path.cwd()}")
         return {}
 
     account_map = {}
@@ -150,7 +161,11 @@ def load_account_map() -> dict:
             print(f"Warning: {ACCOUNT_MAP_FILE} has no headers.")
             return {}
 
-        reader.fieldnames = [header.strip() for header in reader.fieldnames]
+        reader.fieldnames = normalize_headers(reader.fieldnames)
+
+        print("AccountMap.csv headers found:")
+        for header in reader.fieldnames:
+            print(f"  - [{header}]")
 
         required_columns = [
             "Account Name",
@@ -161,23 +176,25 @@ def load_account_map() -> dict:
         missing = [col for col in required_columns if col not in reader.fieldnames]
 
         if missing:
-            print(f"Warning: Missing column(s) in {ACCOUNT_MAP_FILE}:")
+            print("Warning: Missing column(s) in AccountMap.csv:")
             for col in missing:
                 print(f"  - {col}")
             return {}
 
         for row in reader:
-            account_number = row.get("Account Number", "").strip()
+            account_number_raw = clean_text(row.get("Account Number", ""))
+            account_number_key = normalize_account_number(account_number_raw)
 
-            if not account_number:
+            if not account_number_key:
                 continue
 
-            account_map[account_number] = {
-                "Account Name": row.get("Account Name", "").strip() or "Not Found",
-                "Account Number": account_number,
-                "Account owner": row.get("Account owner", "").strip() or "Not Found",
+            account_map[account_number_key] = {
+                "Account Name": clean_text(row.get("Account Name", "")) or "Not Found",
+                "Account Number": account_number_raw or "Not Found",
+                "Account owner": clean_text(row.get("Account owner", "")) or "Not Found",
             }
 
+    print(f"Loaded account mappings: {len(account_map)}")
     return account_map
 
 
@@ -186,88 +203,95 @@ def main():
     output_path = Path(OUTPUT_FILE)
 
     if not input_path.exists():
-        print(f"Error: {INPUT_FILE} not found in current folder: {Path.cwd()}")
+        print(f"Error: {INPUT_FILE} not found in {Path.cwd()}")
         sys.exit(1)
 
     account_map = load_account_map()
 
-    try:
-        with input_path.open("r", newline="", encoding="utf-8-sig") as infile:
-            reader = csv.DictReader(infile)
+    with input_path.open("r", newline="", encoding="utf-8-sig") as infile:
+        reader = csv.DictReader(infile)
 
-            if not reader.fieldnames:
-                print("Error: Results.csv has no headers.")
-                sys.exit(1)
+        if not reader.fieldnames:
+            print("Error: Results.csv has no headers.")
+            sys.exit(1)
 
-            reader.fieldnames = [header.strip() for header in reader.fieldnames]
+        reader.fieldnames = normalize_headers(reader.fieldnames)
 
-            required_columns = ["accountId", "resourceName", "tags"]
+        print("Results.csv headers found:")
+        for header in reader.fieldnames:
+            print(f"  - [{header}]")
 
-            missing_columns = [
-                col for col in required_columns
-                if col not in reader.fieldnames
-            ]
+        required_columns = [
+            "accountId",
+            "resourceName",
+            "tags",
+        ]
 
-            if missing_columns:
-                print("Error: Missing required column(s) in Results.csv:")
-                for col in missing_columns:
-                    print(f"  - {col}")
+        missing_columns = [
+            col for col in required_columns
+            if col not in reader.fieldnames
+        ]
 
-                print("\nAvailable columns:")
-                for header in reader.fieldnames:
-                    print(f"  - {header}")
+        if missing_columns:
+            print("Error: Missing required column(s) in Results.csv:")
+            for col in missing_columns:
+                print(f"  - {col}")
+            sys.exit(1)
 
-                sys.exit(1)
+        matched_count = 0
+        unmatched_count = 0
 
-            with output_path.open("w", newline="", encoding="utf-8") as outfile:
-                writer = csv.writer(outfile)
+        with output_path.open("w", newline="", encoding="utf-8") as outfile:
+            writer = csv.writer(outfile)
+
+            writer.writerow([
+                "Sl No",
+                "Env",
+                "Account Name",
+                "Account Number",
+                "Account owner",
+            ])
+
+            count = 1
+
+            for row in reader:
+                account_id_raw = clean_text(row.get("accountId", ""))
+                account_id_key = normalize_account_number(account_id_raw)
+
+                resource_name = clean_text(row.get("resourceName", ""))
+                tags_value = clean_text(row.get("tags", ""))
+
+                if not account_id_key:
+                    continue
+
+                env = decide_env(resource_name, tags_value)
+
+                account_details = account_map.get(account_id_key)
+
+                if account_details:
+                    matched_count += 1
+                else:
+                    unmatched_count += 1
+                    account_details = {
+                        "Account Name": "Not Found",
+                        "Account Number": account_id_raw,
+                        "Account owner": "Not Found",
+                    }
 
                 writer.writerow([
-                    "Sl No",
-                    "Env",
-                    "Account Name",
-                    "Account Number",
-                    "Account owner",
+                    count,
+                    env,
+                    account_details["Account Name"],
+                    account_details["Account Number"],
+                    account_details["Account owner"],
                 ])
 
-                count = 1
+                count += 1
 
-                for row in reader:
-                    account_id = row.get("accountId", "").strip()
-                    resource_name = row.get("resourceName", "").strip()
-                    tags_value = row.get("tags", "").strip()
-
-                    if not account_id or account_id == "-":
-                        continue
-
-                    env = decide_env(resource_name, tags_value)
-
-                    account_details = account_map.get(account_id, {
-                        "Account Name": "Not Found",
-                        "Account Number": account_id,
-                        "Account owner": "Not Found",
-                    })
-
-                    writer.writerow([
-                        count,
-                        env,
-                        account_details["Account Name"],
-                        account_details["Account Number"],
-                        account_details["Account owner"],
-                    ])
-
-                    count += 1
-
-        print(f"Done! Created {OUTPUT_FILE}")
-        print(f"Total records written: {count - 1}")
-
-    except csv.Error as e:
-        print(f"CSV error: {e}")
-        sys.exit(1)
-
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        sys.exit(1)
+    print(f"Done! Created {OUTPUT_FILE}")
+    print(f"Total records written: {count - 1}")
+    print(f"Matched account records: {matched_count}")
+    print(f"Unmatched account records: {unmatched_count}")
 
 
 if __name__ == "__main__":
