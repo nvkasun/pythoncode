@@ -120,16 +120,12 @@ def parse_tags(tags_value):
     except json.JSONDecodeError:
         tag_dict = {}
 
-        # Fallback regex pattern 1:
-        # {"key":"Environment","tag":"Environment=dev","value":"dev"}
         matches = re.findall(
             r'"key"\s*:\s*"([^"]+)"\s*,\s*"tag"\s*:\s*"[^"]*"\s*,\s*"value"\s*:\s*"([^"]*)"',
             cleaned,
             re.IGNORECASE,
         )
 
-        # Fallback regex pattern 2:
-        # {"value":"dev","key":"Environment"}
         if not matches:
             matches = re.findall(
                 r'"value"\s*:\s*"([^"]*)"\s*,\s*"key"\s*:\s*"([^"]+)"',
@@ -165,7 +161,6 @@ def extract_env_from_resource_name(resource_name):
     if not name:
         return ""
 
-    # Order matters: preprod before prod
     env_patterns = [
         ("preprod", r"(^|[-_])preprod($|[-_])"),
         ("prod", r"(^|[-_])prod($|[-_])"),
@@ -205,9 +200,6 @@ def decide_env(resource_name, tag_dict):
 def extract_first_cluster_member_identifier(dbcluster_members_value):
     """
     Try to extract first dbinstanceIdentifier from configuration.dbclusterMembers.
-
-    Example:
-      [{"dbinstanceIdentifier":"instance-pushnotification-0"}]
     """
 
     dbcluster_members_value = clean_text(dbcluster_members_value)
@@ -385,16 +377,24 @@ def decide_cloudwatch(row, config_dict):
       2. enabledCloudwatchLogsExports from full configuration JSON
       3. Not Found
     """
+
     cloudwatch = get_value(row, "configuration.enabledCloudwatchLogsExports")
 
     if cloudwatch:
+        parsed = parse_json_value(cloudwatch)
+
+        if isinstance(parsed, list):
+            if parsed:
+                return ", ".join(clean_text(item) for item in parsed)
+            return "Not Found"
+
         return cloudwatch
 
     cloudwatch = config_dict.get("enabledCloudwatchLogsExports", "")
 
     if isinstance(cloudwatch, list):
         if cloudwatch:
-            return json.dumps(cloudwatch)
+            return ", ".join(clean_text(item) for item in cloudwatch)
         return "Not Found"
 
     cloudwatch = clean_text(cloudwatch)
@@ -441,6 +441,78 @@ def decide_maintenance_window(row, config_dict):
 
     if maintenance_window:
         return maintenance_window
+
+    return "Not Found"
+
+
+def decide_endpoint(row, config_dict):
+    """
+    EndPoint priority:
+      1. configuration.endpoint.address
+      2. configuration.endpoint.value
+      3. endpoint.address from full configuration JSON
+      4. endpoint.value from full configuration JSON
+      5. Not Found
+    """
+
+    endpoint = get_value(row, "configuration.endpoint.address")
+
+    if endpoint:
+        return endpoint
+
+    endpoint = get_value(row, "configuration.endpoint.value")
+
+    if endpoint:
+        return endpoint
+
+    endpoint_obj = config_dict.get("endpoint", {})
+
+    if isinstance(endpoint_obj, dict):
+        endpoint = clean_text(endpoint_obj.get("address", ""))
+
+        if endpoint:
+            return endpoint
+
+        endpoint = clean_text(endpoint_obj.get("value", ""))
+
+        if endpoint:
+            return endpoint
+
+    return "Not Found"
+
+
+def decide_port(row, config_dict):
+    """
+    Port priority:
+      1. configuration.endpoint.port
+      2. configuration.port
+      3. endpoint.port from full configuration JSON
+      4. port from full configuration JSON
+      5. Not Found
+    """
+
+    port = get_value(row, "configuration.endpoint.port")
+
+    if port:
+        return port
+
+    port = get_value(row, "configuration.port")
+
+    if port:
+        return port
+
+    endpoint_obj = config_dict.get("endpoint", {})
+
+    if isinstance(endpoint_obj, dict):
+        port = clean_text(endpoint_obj.get("port", ""))
+
+        if port:
+            return port
+
+    port = clean_text(config_dict.get("port", ""))
+
+    if port:
+        return port
 
     return "Not Found"
 
@@ -598,6 +670,10 @@ def main():
             "configuration.enabledCloudwatchLogsExports",
             "configuration.backupRetentionPeriod",
             "configuration.preferredMaintenanceWindow",
+            "configuration.endpoint.address",
+            "configuration.endpoint.value",
+            "configuration.endpoint.port",
+            "configuration.port",
             "resourceId",
         ]
 
@@ -632,6 +708,8 @@ def main():
                 "CloudWatch",
                 "Backup Retention",
                 "Maintenance Window",
+                "EndPoint",
+                "Port",
             ])
 
             count = 1
@@ -662,8 +740,9 @@ def main():
                 cloudwatch = decide_cloudwatch(row, config_dict)
                 backup_retention = decide_backup_retention(row, config_dict)
                 maintenance_window = decide_maintenance_window(row, config_dict)
+                endpoint = decide_endpoint(row, config_dict)
+                port = decide_port(row, config_dict)
 
-                # Account details from AccountMap.csv
                 account_details = account_map.get(account_id_key)
 
                 if account_details:
@@ -677,7 +756,6 @@ def main():
                     account_number = account_id_raw
                     account_owner_from_map = "Not Found"
 
-                # Owner fallback from Results.csv tags
                 account_owner_from_tags = clean_text(tag_dict.get("BusinessUnitOwner", ""))
 
                 if account_owner_from_map != "Not Found":
@@ -702,6 +780,8 @@ def main():
                     cloudwatch,
                     backup_retention,
                     maintenance_window,
+                    endpoint,
+                    port,
                 ])
 
                 count += 1
