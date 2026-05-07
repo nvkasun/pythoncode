@@ -56,6 +56,19 @@ def normalize_env(value):
     return mapping.get(value, value)
 
 
+def get_value(row, column_name):
+    """
+    Safely get a column value from Results.csv.
+    Converts empty and '-' values into empty string.
+    """
+    value = clean_text(row.get(column_name, ""))
+
+    if not value or value == "-":
+        return ""
+
+    return value
+
+
 def parse_tags(tags_value):
     """
     Convert tags column into a dictionary:
@@ -76,13 +89,16 @@ def parse_tags(tags_value):
     except json.JSONDecodeError:
         tag_dict = {}
 
-        # Fallback regex for key/value pairs
+        # Fallback regex pattern 1:
+        # {"key":"Environment","tag":"Environment=dev","value":"dev"}
         matches = re.findall(
             r'"key"\s*:\s*"([^"]+)"\s*,\s*"tag"\s*:\s*"[^"]*"\s*,\s*"value"\s*:\s*"([^"]*)"',
             cleaned,
             re.IGNORECASE,
         )
 
+        # Fallback regex pattern 2:
+        # {"value":"dev","key":"Environment"}
         if not matches:
             matches = re.findall(
                 r'"value"\s*:\s*"([^"]*)"\s*,\s*"key"\s*:\s*"([^"]+)"',
@@ -155,6 +171,131 @@ def decide_env(resource_name, tag_dict):
     return "Not Found"
 
 
+def decide_db_type(row):
+    """
+    DB Type comes from:
+      configuration.engine
+
+    Example:
+      aurora-postgresql
+      postgres
+      sqlserver-se
+      oracle-ee
+    """
+
+    engine = get_value(row, "configuration.engine")
+
+    if engine:
+        return engine
+
+    return "Not Found"
+
+
+def decide_engine(row):
+    """
+    engine also comes from:
+      configuration.engine
+
+    Keeping this as a separate function in case you want to change logic later.
+    """
+
+    engine = get_value(row, "configuration.engine")
+
+    if engine:
+        return engine
+
+    return "Not Found"
+
+
+def decide_db_identifier(row):
+    """
+    DB Identifier priority:
+      1. configuration.dBInstanceIdentifier
+      2. configuration.dbclusterMembers first dbinstanceIdentifier
+      3. resourceName
+      4. resourceId
+      5. Not Found
+
+    For DBInstance records:
+      configuration.dBInstanceIdentifier usually has value.
+
+    For DBCluster records:
+      configuration.dBInstanceIdentifier may be '-',
+      so fallback to resourceName.
+    """
+
+    db_identifier = get_value(row, "configuration.dBInstanceIdentifier")
+
+    if db_identifier:
+        return db_identifier
+
+    dbcluster_members = get_value(row, "configuration.dbclusterMembers")
+    member_identifier = extract_first_cluster_member_identifier(dbcluster_members)
+
+    if member_identifier:
+        return member_identifier
+
+    resource_name = get_value(row, "resourceName")
+
+    if resource_name:
+        return resource_name
+
+    resource_id = get_value(row, "resourceId")
+
+    if resource_id:
+        return resource_id
+
+    return "Not Found"
+
+
+def extract_first_cluster_member_identifier(dbcluster_members_value):
+    """
+    Try to extract first dbinstanceIdentifier from configuration.dbclusterMembers.
+
+    Example:
+      [{"dbinstanceIdentifier":"instance-pushnotification-0"}]
+    """
+
+    dbcluster_members_value = clean_text(dbcluster_members_value)
+
+    if not dbcluster_members_value or dbcluster_members_value == "-":
+        return ""
+
+    cleaned = dbcluster_members_value.replace('\\"', '"')
+
+    try:
+        members = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(
+            r'"dbinstanceIdentifier"\s*:\s*"([^"]+)"',
+            cleaned,
+            re.IGNORECASE,
+        )
+
+        if match:
+            return clean_text(match.group(1))
+
+        return ""
+
+    if isinstance(members, list):
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+
+            identifier = clean_text(member.get("dbinstanceIdentifier", ""))
+
+            if identifier:
+                return identifier
+
+    if isinstance(members, dict):
+        identifier = clean_text(members.get("dbinstanceIdentifier", ""))
+
+        if identifier:
+            return identifier
+
+    return ""
+
+
 def get_column_name(fieldnames, possible_names):
     """
     Flexible header matcher.
@@ -172,6 +313,7 @@ def get_column_name(fieldnames, possible_names):
 
     for name in possible_names:
         normalized_name = normalize_header(name)
+
         if normalized_name in normalized_lookup:
             return normalized_lookup[normalized_name]
 
@@ -294,7 +436,15 @@ def main():
         for h in reader.fieldnames:
             print(f"  - [{h}]")
 
-        required_columns = ["accountId", "resourceName", "tags"]
+        required_columns = [
+            "accountId",
+            "resourceName",
+            "tags",
+            "configuration.engine",
+            "configuration.dBInstanceIdentifier",
+            "configuration.dbclusterMembers",
+            "resourceId",
+        ]
 
         missing = [col for col in required_columns if col not in reader.fieldnames]
 
@@ -302,6 +452,11 @@ def main():
             print("\nERROR: Missing required columns in Results.csv:")
             for col in missing:
                 print(f"  - {col}")
+
+            print("\nAvailable Results.csv columns:")
+            for h in reader.fieldnames:
+                print(f"  - {h}")
+
             sys.exit(1)
 
         with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as outfile:
@@ -313,6 +468,9 @@ def main():
                 "Account Name",
                 "Account Number",
                 "Account owner",
+                "DB Type",
+                "DB Identifier",
+                "engine",
             ])
 
             count = 1
@@ -331,7 +489,11 @@ def main():
 
                 env = decide_env(resource_name, tag_dict)
 
-                # Account details from mapping file
+                db_type = decide_db_type(row)
+                db_identifier = decide_db_identifier(row)
+                engine = decide_engine(row)
+
+                # Account details from AccountMap.csv
                 account_details = account_map.get(account_id_key)
 
                 if account_details:
@@ -361,6 +523,9 @@ def main():
                     account_name,
                     account_number,
                     final_account_owner,
+                    db_type,
+                    db_identifier,
+                    engine,
                 ])
 
                 count += 1
