@@ -10,19 +10,11 @@ from pathlib import Path
 # Configuration
 # =====================================================
 INPUT_FILE = "Results.csv"
+ACCOUNT_MAP_FILE = "AccountMap.csv"
 OUTPUT_FILE = "Final_Records.csv"
-
-VALID_ENVS = ["prod", "preprod", "uat", "dev", "sit"]
 
 
 def normalize_env(value: str) -> str:
-    """
-    Normalize environment values.
-    Example:
-      Production -> prod
-      PREPROD -> preprod
-      dev -> dev
-    """
     if not value:
         return ""
 
@@ -32,8 +24,9 @@ def normalize_env(value: str) -> str:
         "production": "prod",
         "prod": "prod",
         "pre-production": "preprod",
-        "preprod": "preprod",
+        "pre_prod": "preprod",
         "pre-prod": "preprod",
+        "preprod": "preprod",
         "uat": "uat",
         "dev": "dev",
         "development": "dev",
@@ -44,13 +37,6 @@ def normalize_env(value: str) -> str:
 
 
 def extract_env_from_resource_name(resource_name: str) -> str:
-    """
-    Extract environment from resourceName.
-    Example:
-      cluster-digitalonboarding-dev -> dev
-      cluster-transactionauthenticator-preprod -> preprod
-    """
-
     if not resource_name:
         return ""
 
@@ -73,16 +59,6 @@ def extract_env_from_resource_name(resource_name: str) -> str:
 
 
 def extract_env_from_tags(tags_value: str) -> str:
-    """
-    Extract Environment value from tags column.
-
-    Expected tags format:
-      [
-        {"tag":"Environment=dev","value":"dev","key":"Environment"},
-        {"tag":"Name=cluster-example-dev","value":"cluster-example-dev","key":"Name"}
-      ]
-    """
-
     if not tags_value:
         return ""
 
@@ -91,25 +67,17 @@ def extract_env_from_tags(tags_value: str) -> str:
     if tags_value in ["", "-"]:
         return ""
 
-    # Some CSV exports may store escaped quotes
     cleaned = tags_value.replace('\\"', '"')
 
     try:
         tags = json.loads(cleaned)
     except json.JSONDecodeError:
-        # Fallback regex if JSON parsing fails
+        # Fallback if tags JSON parsing fails
         match = re.search(
-            r'"key"\s*:\s*"Environment"\s*,\s*"tag"\s*:\s*"Environment=([^"]+)"',
+            r'"key"\s*:\s*"Environment".*?"value"\s*:\s*"([^"]+)"',
             cleaned,
             re.IGNORECASE,
         )
-
-        if not match:
-            match = re.search(
-                r'"key"\s*:\s*"Environment"\s*,\s*"value"\s*:\s*"([^"]+)"',
-                cleaned,
-                re.IGNORECASE,
-            )
 
         if not match:
             match = re.search(
@@ -139,31 +107,78 @@ def extract_env_from_tags(tags_value: str) -> str:
     return ""
 
 
-def decide_env(resource_name: str, tags_value: str):
+def decide_env(resource_name: str, tags_value: str) -> str:
     """
-    Decide final environment using both tags and resourceName.
-
     Priority:
-      1. tags Environment value
-      2. resourceName fallback
+      1. Environment tag
+      2. resourceName
+      3. Not Found
     """
-
     env_from_tags = extract_env_from_tags(tags_value)
     env_from_name = extract_env_from_resource_name(resource_name)
 
-    if env_from_tags and env_from_name:
-        if env_from_tags == env_from_name:
-            return env_from_tags, "tags_and_resourceName_matched"
-        else:
-            return env_from_tags, f"conflict_tags={env_from_tags}_resourceName={env_from_name}"
-
     if env_from_tags:
-        return env_from_tags, "tags"
+        return env_from_tags
 
     if env_from_name:
-        return env_from_name, "resourceName"
+        return env_from_name
 
-    return "", "not_found"
+    return "Not Found"
+
+
+def load_account_map() -> dict:
+    """
+    Load account mapping from AccountMap.csv.
+
+    Expected headers:
+      Account Name,Account Number,Account owner
+    """
+
+    map_path = Path(ACCOUNT_MAP_FILE)
+
+    if not map_path.exists():
+        print(f"Warning: {ACCOUNT_MAP_FILE} not found.")
+        print("Account details will be marked as 'Not Found'.")
+        return {}
+
+    account_map = {}
+
+    with map_path.open("r", newline="", encoding="utf-8-sig") as mapfile:
+        reader = csv.DictReader(mapfile)
+
+        if not reader.fieldnames:
+            print(f"Warning: {ACCOUNT_MAP_FILE} has no headers.")
+            return {}
+
+        reader.fieldnames = [header.strip() for header in reader.fieldnames]
+
+        required_columns = [
+            "Account Name",
+            "Account Number",
+            "Account owner",
+        ]
+
+        missing = [col for col in required_columns if col not in reader.fieldnames]
+
+        if missing:
+            print(f"Warning: Missing column(s) in {ACCOUNT_MAP_FILE}:")
+            for col in missing:
+                print(f"  - {col}")
+            return {}
+
+        for row in reader:
+            account_number = row.get("Account Number", "").strip()
+
+            if not account_number:
+                continue
+
+            account_map[account_number] = {
+                "Account Name": row.get("Account Name", "").strip() or "Not Found",
+                "Account Number": account_number,
+                "Account owner": row.get("Account owner", "").strip() or "Not Found",
+            }
+
+    return account_map
 
 
 def main():
@@ -174,12 +189,14 @@ def main():
         print(f"Error: {INPUT_FILE} not found in current folder: {Path.cwd()}")
         sys.exit(1)
 
+    account_map = load_account_map()
+
     try:
         with input_path.open("r", newline="", encoding="utf-8-sig") as infile:
             reader = csv.DictReader(infile)
 
             if not reader.fieldnames:
-                print("Error: CSV file has no headers.")
+                print("Error: Results.csv has no headers.")
                 sys.exit(1)
 
             reader.fieldnames = [header.strip() for header in reader.fieldnames]
@@ -192,7 +209,7 @@ def main():
             ]
 
             if missing_columns:
-                print("Error: Missing required column(s):")
+                print("Error: Missing required column(s) in Results.csv:")
                 for col in missing_columns:
                     print(f"  - {col}")
 
@@ -207,10 +224,10 @@ def main():
 
                 writer.writerow([
                     "Sl No",
-                    "accountId",
-                    "resourceName",
                     "Env",
-                    "EnvSource"
+                    "Account Name",
+                    "Account Number",
+                    "Account owner",
                 ])
 
                 count = 1
@@ -223,14 +240,20 @@ def main():
                     if not account_id or account_id == "-":
                         continue
 
-                    env, env_source = decide_env(resource_name, tags_value)
+                    env = decide_env(resource_name, tags_value)
+
+                    account_details = account_map.get(account_id, {
+                        "Account Name": "Not Found",
+                        "Account Number": account_id,
+                        "Account owner": "Not Found",
+                    })
 
                     writer.writerow([
                         count,
-                        account_id,
-                        resource_name,
                         env,
-                        env_source
+                        account_details["Account Name"],
+                        account_details["Account Number"],
+                        account_details["Account owner"],
                     ])
 
                     count += 1
