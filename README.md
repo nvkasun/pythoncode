@@ -69,6 +69,37 @@ def get_value(row, column_name):
     return value
 
 
+def parse_json_value(raw_value):
+    """
+    Safely parse JSON value from CSV cell.
+    Handles escaped quotes from AWS Config CSV exports.
+    """
+    raw_value = clean_text(raw_value)
+
+    if not raw_value or raw_value == "-":
+        return None
+
+    cleaned = raw_value.replace('\\"', '"')
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+
+
+def parse_configuration(configuration_value):
+    """
+    Parse full configuration JSON column.
+    Used to extract fields that may not exist as separate CSV columns.
+    """
+    parsed = parse_json_value(configuration_value)
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    return {}
+
+
 def parse_tags(tags_value):
     """
     Convert tags column into a dictionary:
@@ -171,83 +202,6 @@ def decide_env(resource_name, tag_dict):
     return "Not Found"
 
 
-def decide_db_type(row):
-    """
-    DB Type comes from:
-      configuration.engine
-
-    Example:
-      aurora-postgresql
-      postgres
-      sqlserver-se
-      oracle-ee
-    """
-
-    engine = get_value(row, "configuration.engine")
-
-    if engine:
-        return engine
-
-    return "Not Found"
-
-
-def decide_engine(row):
-    """
-    engine also comes from:
-      configuration.engine
-
-    Keeping this as a separate function in case you want to change logic later.
-    """
-
-    engine = get_value(row, "configuration.engine")
-
-    if engine:
-        return engine
-
-    return "Not Found"
-
-
-def decide_db_identifier(row):
-    """
-    DB Identifier priority:
-      1. configuration.dBInstanceIdentifier
-      2. configuration.dbclusterMembers first dbinstanceIdentifier
-      3. resourceName
-      4. resourceId
-      5. Not Found
-
-    For DBInstance records:
-      configuration.dBInstanceIdentifier usually has value.
-
-    For DBCluster records:
-      configuration.dBInstanceIdentifier may be '-',
-      so fallback to resourceName.
-    """
-
-    db_identifier = get_value(row, "configuration.dBInstanceIdentifier")
-
-    if db_identifier:
-        return db_identifier
-
-    dbcluster_members = get_value(row, "configuration.dbclusterMembers")
-    member_identifier = extract_first_cluster_member_identifier(dbcluster_members)
-
-    if member_identifier:
-        return member_identifier
-
-    resource_name = get_value(row, "resourceName")
-
-    if resource_name:
-        return resource_name
-
-    resource_id = get_value(row, "resourceId")
-
-    if resource_id:
-        return resource_id
-
-    return "Not Found"
-
-
 def extract_first_cluster_member_identifier(dbcluster_members_value):
     """
     Try to extract first dbinstanceIdentifier from configuration.dbclusterMembers.
@@ -294,6 +248,201 @@ def extract_first_cluster_member_identifier(dbcluster_members_value):
             return identifier
 
     return ""
+
+
+def decide_db_type(row, config_dict):
+    """
+    DB Type comes from configuration.engine.
+    """
+    engine = get_value(row, "configuration.engine")
+
+    if engine:
+        return engine
+
+    engine = clean_text(config_dict.get("engine", ""))
+
+    if engine:
+        return engine
+
+    return "Not Found"
+
+
+def decide_engine(row, config_dict):
+    """
+    engine comes from configuration.engine.
+    """
+    engine = get_value(row, "configuration.engine")
+
+    if engine:
+        return engine
+
+    engine = clean_text(config_dict.get("engine", ""))
+
+    if engine:
+        return engine
+
+    return "Not Found"
+
+
+def decide_db_identifier(row):
+    """
+    DB Identifier priority:
+      1. configuration.dBInstanceIdentifier
+      2. configuration.dbclusterMembers first dbinstanceIdentifier
+      3. resourceName
+      4. resourceId
+      5. Not Found
+    """
+
+    db_identifier = get_value(row, "configuration.dBInstanceIdentifier")
+
+    if db_identifier:
+        return db_identifier
+
+    dbcluster_members = get_value(row, "configuration.dbclusterMembers")
+    member_identifier = extract_first_cluster_member_identifier(dbcluster_members)
+
+    if member_identifier:
+        return member_identifier
+
+    resource_name = get_value(row, "resourceName")
+
+    if resource_name:
+        return resource_name
+
+    resource_id = get_value(row, "resourceId")
+
+    if resource_id:
+        return resource_id
+
+    return "Not Found"
+
+
+def decide_db_name(row, config_dict):
+    """
+    DB Name priority:
+      1. configuration.databaseName direct column, if present
+      2. databaseName from full configuration JSON
+      3. Not Found
+    """
+    db_name = get_value(row, "configuration.databaseName")
+
+    if db_name:
+        return db_name
+
+    db_name = clean_text(config_dict.get("databaseName", ""))
+
+    if db_name:
+        return db_name
+
+    return "Not Found"
+
+
+def decide_master_user(row, config_dict):
+    """
+    MasterUser priority:
+      1. configuration.masterUsername direct column
+      2. masterUsername from full configuration JSON
+      3. Not Found
+    """
+    master_user = get_value(row, "configuration.masterUsername")
+
+    if master_user:
+        return master_user
+
+    master_user = clean_text(config_dict.get("masterUsername", ""))
+
+    if master_user:
+        return master_user
+
+    return "Not Found"
+
+
+def decide_db_version(row, config_dict):
+    """
+    DB Version priority:
+      1. configuration.engineVersion direct column
+      2. engineVersion from full configuration JSON
+      3. Not Found
+    """
+    db_version = get_value(row, "configuration.engineVersion")
+
+    if db_version:
+        return db_version
+
+    db_version = clean_text(config_dict.get("engineVersion", ""))
+
+    if db_version:
+        return db_version
+
+    return "Not Found"
+
+
+def decide_cloudwatch(row, config_dict):
+    """
+    CloudWatch priority:
+      1. configuration.enabledCloudwatchLogsExports direct column
+      2. enabledCloudwatchLogsExports from full configuration JSON
+      3. Not Found
+    """
+    cloudwatch = get_value(row, "configuration.enabledCloudwatchLogsExports")
+
+    if cloudwatch:
+        return cloudwatch
+
+    cloudwatch = config_dict.get("enabledCloudwatchLogsExports", "")
+
+    if isinstance(cloudwatch, list):
+        if cloudwatch:
+            return json.dumps(cloudwatch)
+        return "Not Found"
+
+    cloudwatch = clean_text(cloudwatch)
+
+    if cloudwatch:
+        return cloudwatch
+
+    return "Not Found"
+
+
+def decide_backup_retention(row, config_dict):
+    """
+    Backup Retention priority:
+      1. configuration.backupRetentionPeriod direct column
+      2. backupRetentionPeriod from full configuration JSON
+      3. Not Found
+    """
+    backup_retention = get_value(row, "configuration.backupRetentionPeriod")
+
+    if backup_retention:
+        return backup_retention
+
+    backup_retention = clean_text(config_dict.get("backupRetentionPeriod", ""))
+
+    if backup_retention:
+        return backup_retention
+
+    return "Not Found"
+
+
+def decide_maintenance_window(row, config_dict):
+    """
+    Maintenance Window priority:
+      1. configuration.preferredMaintenanceWindow direct column
+      2. preferredMaintenanceWindow from full configuration JSON
+      3. Not Found
+    """
+    maintenance_window = get_value(row, "configuration.preferredMaintenanceWindow")
+
+    if maintenance_window:
+        return maintenance_window
+
+    maintenance_window = clean_text(config_dict.get("preferredMaintenanceWindow", ""))
+
+    if maintenance_window:
+        return maintenance_window
+
+    return "Not Found"
 
 
 def get_column_name(fieldnames, possible_names):
@@ -440,9 +589,15 @@ def main():
             "accountId",
             "resourceName",
             "tags",
+            "configuration",
             "configuration.engine",
+            "configuration.engineVersion",
             "configuration.dBInstanceIdentifier",
             "configuration.dbclusterMembers",
+            "configuration.masterUsername",
+            "configuration.enabledCloudwatchLogsExports",
+            "configuration.backupRetentionPeriod",
+            "configuration.preferredMaintenanceWindow",
             "resourceId",
         ]
 
@@ -471,6 +626,12 @@ def main():
                 "DB Type",
                 "DB Identifier",
                 "engine",
+                "DB Name",
+                "MasterUser",
+                "DB Version",
+                "CloudWatch",
+                "Backup Retention",
+                "Maintenance Window",
             ])
 
             count = 1
@@ -484,14 +645,23 @@ def main():
 
                 resource_name = clean_text(row.get("resourceName", ""))
                 tags_value = clean_text(row.get("tags", ""))
+                configuration_value = clean_text(row.get("configuration", ""))
 
                 tag_dict = parse_tags(tags_value)
+                config_dict = parse_configuration(configuration_value)
 
                 env = decide_env(resource_name, tag_dict)
 
-                db_type = decide_db_type(row)
+                db_type = decide_db_type(row, config_dict)
                 db_identifier = decide_db_identifier(row)
-                engine = decide_engine(row)
+                engine = decide_engine(row, config_dict)
+
+                db_name = decide_db_name(row, config_dict)
+                master_user = decide_master_user(row, config_dict)
+                db_version = decide_db_version(row, config_dict)
+                cloudwatch = decide_cloudwatch(row, config_dict)
+                backup_retention = decide_backup_retention(row, config_dict)
+                maintenance_window = decide_maintenance_window(row, config_dict)
 
                 # Account details from AccountMap.csv
                 account_details = account_map.get(account_id_key)
@@ -526,6 +696,12 @@ def main():
                     db_type,
                     db_identifier,
                     engine,
+                    db_name,
+                    master_user,
+                    db_version,
+                    cloudwatch,
+                    backup_retention,
+                    maintenance_window,
                 ])
 
                 count += 1
