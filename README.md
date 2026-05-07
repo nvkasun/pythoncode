@@ -110,23 +110,20 @@ def parse_tags(tags_value):
     except json.JSONDecodeError:
         tag_dict = {}
 
-        # Format:
-        # {"key":"Environment","tag":"Environment=dev","value":"dev"}
+        # Fallback pattern for objects containing key and value in any common order.
         matches = re.findall(
-            r'"key"\s*:\s*"([^"]+)"\s*,\s*"tag"\s*:\s*"[^"]*"\s*,\s*"value"\s*:\s*"([^"]*)"',
+            r'\{[^{}]*"key"\s*:\s*"([^"]+)"[^{}]*"value"\s*:\s*"([^"]*)"[^{}]*\}',
             cleaned,
             re.IGNORECASE,
         )
 
-        # Format:
-        # {"value":"dev","key":"Environment"}
         if not matches:
-            matches = re.findall(
-                r'"value"\s*:\s*"([^"]*)"\s*,\s*"key"\s*:\s*"([^"]+)"',
+            matches_reversed = re.findall(
+                r'\{[^{}]*"value"\s*:\s*"([^"]*)"[^{}]*"key"\s*:\s*"([^"]+)"[^{}]*\}',
                 cleaned,
                 re.IGNORECASE,
             )
-            matches = [(key, value) for value, key in matches]
+            matches = [(key, value) for value, key in matches_reversed]
 
         for key, value in matches:
             tag_dict[clean_text(key)] = clean_text(value)
@@ -196,14 +193,65 @@ def extract_project_from_config_tag_list(config_dict):
     return ""
 
 
-def decide_account_name_from_project(tag_dict, config_dict):
+def extract_project_from_raw_configuration(configuration_value):
+    """
+    Fallback extraction from raw configuration JSON text.
+
+    Handles cases like:
+      {"value":"cdp-foundations-uat","key":"project"}
+      {"key":"project","value":"cdp-foundations-uat"}
+      {"tag":"project=cdp-foundations-uat","value":"cdp-foundations-uat","key":"project"}
+    """
+
+    raw = clean_text(configuration_value)
+
+    if not raw or raw == "-":
+        return ""
+
+    cleaned = raw.replace('\\"', '"')
+
+    # Case 1: "key":"project" appears before "value":"..."
+    match = re.search(
+        r'\{[^{}]*"key"\s*:\s*"project"[^{}]*"value"\s*:\s*"([^"]+)"[^{}]*\}',
+        cleaned,
+        re.IGNORECASE,
+    )
+
+    if match:
+        return clean_text(match.group(1))
+
+    # Case 2: "value":"..." appears before "key":"project"
+    match = re.search(
+        r'\{[^{}]*"value"\s*:\s*"([^"]+)"[^{}]*"key"\s*:\s*"project"[^{}]*\}',
+        cleaned,
+        re.IGNORECASE,
+    )
+
+    if match:
+        return clean_text(match.group(1))
+
+    # Case 3: tag format project=value
+    match = re.search(
+        r'"tag"\s*:\s*"project=([^"]+)"',
+        cleaned,
+        re.IGNORECASE,
+    )
+
+    if match:
+        return clean_text(match.group(1))
+
+    return ""
+
+
+def decide_account_name_from_project(tag_dict, config_dict, configuration_value):
     """
     Account Name comes only from project tag.
 
     Priority:
       1. tags column -> project
       2. configuration.tagList -> project
-      3. Not Found
+      3. raw configuration JSON regex fallback -> project
+      4. Not Found
     """
 
     project = get_tag_value(tag_dict, "project")
@@ -212,6 +260,11 @@ def decide_account_name_from_project(tag_dict, config_dict):
         return project
 
     project = extract_project_from_config_tag_list(config_dict)
+
+    if project:
+        return project
+
+    project = extract_project_from_raw_configuration(configuration_value)
 
     if project:
         return project
@@ -540,6 +593,7 @@ def load_account_map():
     Account Name now comes only from:
       1. tags -> project
       2. configuration.tagList -> project
+      3. raw configuration fallback -> project
 
     AccountMap.csv is still useful for:
       Account Number
@@ -727,10 +781,11 @@ def main():
 
                 env = decide_env(resource_name, tag_dict)
 
-                # Account Name comes only from project:
-                # 1. tags column -> project
-                # 2. configuration.tagList -> project
-                account_name = decide_account_name_from_project(tag_dict, config_dict)
+                account_name = decide_account_name_from_project(
+                    tag_dict,
+                    config_dict,
+                    configuration_value,
+                )
 
                 db_type = decide_db_type(row, config_dict)
                 db_identifier = decide_db_identifier(row)
