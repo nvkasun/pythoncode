@@ -8,6 +8,7 @@ from pathlib import Path
 
 INPUT_FILE = "Results.csv"
 ACCOUNT_MAP_FILE = "AccountMap.csv"
+ACCOUNT_NAMES_FILE = "account_names.csv"
 OUTPUT_FILE = "Final_Records.csv"
 
 
@@ -89,15 +90,6 @@ def parse_configuration(configuration_value):
 
 
 def parse_tags(tags_value):
-    """
-    Convert tags column into a dictionary.
-
-    Example:
-      Environment -> dev
-      BusinessUnitOwner -> MichaelJoelDeGroot
-      project -> cdp-foundations-uat
-    """
-
     tags_value = clean_text(tags_value)
 
     if not tags_value or tags_value == "-":
@@ -110,7 +102,6 @@ def parse_tags(tags_value):
     except json.JSONDecodeError:
         tag_dict = {}
 
-        # Fallback pattern for objects containing key and value in any common order.
         matches = re.findall(
             r'\{[^{}]*"key"\s*:\s*"([^"]+)"[^{}]*"value"\s*:\s*"([^"]*)"[^{}]*\}',
             cleaned,
@@ -147,15 +138,6 @@ def parse_tags(tags_value):
 
 
 def get_tag_value(tag_dict, key_name):
-    """
-    Get tag value case-insensitively.
-
-    Example:
-      project
-      Project
-      PROJECT
-    """
-
     key_name_lower = clean_text(key_name).lower()
 
     for key, value in tag_dict.items():
@@ -166,15 +148,6 @@ def get_tag_value(tag_dict, key_name):
 
 
 def extract_project_from_config_tag_list(config_dict):
-    """
-    Extract project from configuration.tagList if available.
-
-    Example:
-      "tagList": [
-        {"key": "project", "value": "cdp-foundations-uat"}
-      ]
-    """
-
     tag_list = config_dict.get("tagList", [])
 
     if not isinstance(tag_list, list):
@@ -194,15 +167,6 @@ def extract_project_from_config_tag_list(config_dict):
 
 
 def extract_project_from_raw_configuration(configuration_value):
-    """
-    Fallback extraction from raw configuration JSON text.
-
-    Handles cases like:
-      {"value":"cdp-foundations-uat","key":"project"}
-      {"key":"project","value":"cdp-foundations-uat"}
-      {"tag":"project=cdp-foundations-uat","value":"cdp-foundations-uat","key":"project"}
-    """
-
     raw = clean_text(configuration_value)
 
     if not raw or raw == "-":
@@ -210,7 +174,6 @@ def extract_project_from_raw_configuration(configuration_value):
 
     cleaned = raw.replace('\\"', '"')
 
-    # Case 1: "key":"project" appears before "value":"..."
     match = re.search(
         r'\{[^{}]*"key"\s*:\s*"project"[^{}]*"value"\s*:\s*"([^"]+)"[^{}]*\}',
         cleaned,
@@ -220,7 +183,6 @@ def extract_project_from_raw_configuration(configuration_value):
     if match:
         return clean_text(match.group(1))
 
-    # Case 2: "value":"..." appears before "key":"project"
     match = re.search(
         r'\{[^{}]*"value"\s*:\s*"([^"]+)"[^{}]*"key"\s*:\s*"project"[^{}]*\}',
         cleaned,
@@ -230,7 +192,6 @@ def extract_project_from_raw_configuration(configuration_value):
     if match:
         return clean_text(match.group(1))
 
-    # Case 3: tag format project=value
     match = re.search(
         r'"tag"\s*:\s*"project=([^"]+)"',
         cleaned,
@@ -245,13 +206,11 @@ def extract_project_from_raw_configuration(configuration_value):
 
 def decide_account_name_from_project(tag_dict, config_dict, configuration_value):
     """
-    Account Name comes only from project tag.
-
+    Fallback account name from Results.csv project tag.
     Priority:
       1. tags column -> project
       2. configuration.tagList -> project
       3. raw configuration JSON regex fallback -> project
-      4. Not Found
     """
 
     project = get_tag_value(tag_dict, "project")
@@ -269,7 +228,7 @@ def decide_account_name_from_project(tag_dict, config_dict, configuration_value)
     if project:
         return project
 
-    return "Not Found"
+    return ""
 
 
 def extract_env_from_resource_name(resource_name):
@@ -278,7 +237,6 @@ def extract_env_from_resource_name(resource_name):
     if not name:
         return ""
 
-    # Order matters: preprod before prod
     env_patterns = [
         ("preprod", r"(^|[-_])preprod($|[-_])"),
         ("prod", r"(^|[-_])prod($|[-_])"),
@@ -295,13 +253,6 @@ def extract_env_from_resource_name(resource_name):
 
 
 def decide_env(resource_name, tag_dict):
-    """
-    Priority:
-      1. tags -> Environment
-      2. resourceName
-      3. Not Found
-    """
-
     env_from_tags = normalize_env(get_tag_value(tag_dict, "Environment"))
 
     if env_from_tags:
@@ -312,7 +263,7 @@ def decide_env(resource_name, tag_dict):
     if env_from_name:
         return env_from_name
 
-    return "Not Found"
+    return ""
 
 
 def extract_first_cluster_member_identifier(dbcluster_members_value):
@@ -367,7 +318,7 @@ def decide_db_type(row, config_dict):
     if engine:
         return engine
 
-    return "Not Found"
+    return ""
 
 
 def decide_engine(row, config_dict):
@@ -381,19 +332,10 @@ def decide_engine(row, config_dict):
     if engine:
         return engine
 
-    return "Not Found"
+    return ""
 
 
 def decide_db_identifier(row):
-    """
-    DB Identifier priority:
-      1. configuration.dBInstanceIdentifier
-      2. configuration.dbclusterMembers first dbinstanceIdentifier
-      3. resourceName
-      4. resourceId
-      5. Not Found
-    """
-
     db_identifier = get_value(row, "configuration.dBInstanceIdentifier")
 
     if db_identifier:
@@ -415,7 +357,7 @@ def decide_db_identifier(row):
     if resource_id:
         return resource_id
 
-    return "Not Found"
+    return ""
 
 
 def decide_db_name(row, config_dict):
@@ -429,7 +371,7 @@ def decide_db_name(row, config_dict):
     if db_name:
         return db_name
 
-    return "Not Found"
+    return ""
 
 
 def decide_master_user(row, config_dict):
@@ -443,7 +385,7 @@ def decide_master_user(row, config_dict):
     if master_user:
         return master_user
 
-    return "Not Found"
+    return ""
 
 
 def decide_db_version(row, config_dict):
@@ -457,7 +399,7 @@ def decide_db_version(row, config_dict):
     if db_version:
         return db_version
 
-    return "Not Found"
+    return ""
 
 
 def decide_cloudwatch(row, config_dict):
@@ -469,7 +411,7 @@ def decide_cloudwatch(row, config_dict):
         if isinstance(parsed, list):
             if parsed:
                 return ", ".join(clean_text(item) for item in parsed)
-            return "Not Found"
+            return ""
 
         return cloudwatch
 
@@ -478,14 +420,14 @@ def decide_cloudwatch(row, config_dict):
     if isinstance(cloudwatch, list):
         if cloudwatch:
             return ", ".join(clean_text(item) for item in cloudwatch)
-        return "Not Found"
+        return ""
 
     cloudwatch = clean_text(cloudwatch)
 
     if cloudwatch:
         return cloudwatch
 
-    return "Not Found"
+    return ""
 
 
 def decide_backup_retention(row, config_dict):
@@ -499,7 +441,7 @@ def decide_backup_retention(row, config_dict):
     if backup_retention:
         return backup_retention
 
-    return "Not Found"
+    return ""
 
 
 def decide_maintenance_window(row, config_dict):
@@ -513,7 +455,7 @@ def decide_maintenance_window(row, config_dict):
     if maintenance_window:
         return maintenance_window
 
-    return "Not Found"
+    return ""
 
 
 def decide_endpoint(row, config_dict):
@@ -540,7 +482,7 @@ def decide_endpoint(row, config_dict):
         if endpoint:
             return endpoint
 
-    return "Not Found"
+    return ""
 
 
 def decide_port(row, config_dict):
@@ -567,7 +509,7 @@ def decide_port(row, config_dict):
     if port:
         return port
 
-    return "Not Found"
+    return ""
 
 
 def get_column_name(fieldnames, possible_names):
@@ -585,17 +527,11 @@ def get_column_name(fieldnames, possible_names):
     return None
 
 
-def load_account_map():
+def load_account_owner_map():
     """
     Loads AccountMap.csv.
 
-    Account Name is NOT taken from AccountMap.csv.
-    Account Name now comes only from:
-      1. tags -> project
-      2. configuration.tagList -> project
-      3. raw configuration fallback -> project
-
-    AccountMap.csv is still useful for:
+    Used for:
       Account Number
       Account owner fallback
     """
@@ -664,12 +600,95 @@ def load_account_map():
             account_owner = clean_text(row.get(account_owner_col, "")) if account_owner_col else ""
 
             account_map[account_number_key] = {
-                "Account Number": account_number_raw or "Not Found",
-                "Account owner": account_owner or "Not Found",
+                "Account Number": account_number_raw or "",
+                "Account owner": account_owner or "",
             }
 
-    print(f"\nLoaded account mappings: {len(account_map)}")
+    print(f"\nLoaded account owner mappings: {len(account_map)}")
     return account_map
+
+
+def load_account_name_map():
+    """
+    Loads account_names.csv.
+
+    Used for:
+      Account Name
+
+    Expected columns can be flexible:
+      Account Number, Account Name
+      accountId, AccountName
+      Account ID, Name
+    """
+
+    map_path = Path(ACCOUNT_NAMES_FILE)
+
+    if not map_path.exists():
+        print(f"WARNING: {ACCOUNT_NAMES_FILE} not found in: {Path.cwd()}")
+        print("Account Name will fallback to project tag from Results.csv.")
+        return {}
+
+    account_name_map = {}
+
+    with map_path.open("r", newline="", encoding="utf-8-sig") as mapfile:
+        sample = mapfile.read(2048)
+        mapfile.seek(0)
+
+        try:
+            dialect = csv.Sniffer().sniff(sample)
+        except csv.Error:
+            dialect = csv.excel
+
+        reader = csv.DictReader(mapfile, dialect=dialect)
+
+        if not reader.fieldnames:
+            print(f"WARNING: {ACCOUNT_NAMES_FILE} has no headers.")
+            return {}
+
+        reader.fieldnames = [clean_text(h) for h in reader.fieldnames]
+
+        print("\naccount_names.csv headers found:")
+        for h in reader.fieldnames:
+            print(f"  - [{h}]")
+
+        account_number_col = get_column_name(reader.fieldnames, [
+            "Account Number",
+            "AccountNumber",
+            "accountId",
+            "Account Id",
+            "Account ID",
+            "Account",
+        ])
+
+        account_name_col = get_column_name(reader.fieldnames, [
+            "Account Name",
+            "AccountName",
+            "Name",
+            "Account Alias",
+            "AccountAlias",
+        ])
+
+        print("\nDetected account_names columns:")
+        print(f"  Account Number -> {account_number_col}")
+        print(f"  Account Name   -> {account_name_col}")
+
+        if not account_number_col or not account_name_col:
+            print("\nERROR: Could not detect required columns in account_names.csv")
+            return {}
+
+        for row in reader:
+            account_number_raw = clean_text(row.get(account_number_col, ""))
+            account_number_key = normalize_account_number(account_number_raw)
+            account_name = clean_text(row.get(account_name_col, ""))
+
+            if not account_number_key:
+                continue
+
+            if account_name:
+                account_name_map[account_number_key] = account_name
+
+    print(f"\nLoaded account name mappings: {len(account_name_map)}")
+    return account_name_map
 
 
 def main():
@@ -679,10 +698,14 @@ def main():
         print(f"ERROR: {INPUT_FILE} not found in: {Path.cwd()}")
         sys.exit(1)
 
-    account_map = load_account_map()
+    account_owner_map = load_account_owner_map()
+    account_name_map = load_account_name_map()
 
-    matched_count = 0
-    unmatched_count = 0
+    matched_owner_count = 0
+    unmatched_owner_count = 0
+    matched_name_count = 0
+    fallback_project_name_count = 0
+    unmatched_name_count = 0
 
     with input_path.open("r", newline="", encoding="utf-8-sig") as infile:
         reader = csv.DictReader(infile)
@@ -781,11 +804,24 @@ def main():
 
                 env = decide_env(resource_name, tag_dict)
 
-                account_name = decide_account_name_from_project(
-                    tag_dict,
-                    config_dict,
-                    configuration_value,
-                )
+                # Account Name priority:
+                # 1. account_names.csv mapping
+                # 2. project tag from Results.csv
+                account_name = account_name_map.get(account_id_key, "")
+
+                if account_name:
+                    matched_name_count += 1
+                else:
+                    account_name = decide_account_name_from_project(
+                        tag_dict,
+                        config_dict,
+                        configuration_value,
+                    )
+
+                    if account_name:
+                        fallback_project_name_count += 1
+                    else:
+                        unmatched_name_count += 1
 
                 db_type = decide_db_type(row, config_dict)
                 db_identifier = decide_db_identifier(row)
@@ -800,25 +836,25 @@ def main():
                 endpoint = decide_endpoint(row, config_dict)
                 port = decide_port(row, config_dict)
 
-                account_details = account_map.get(account_id_key)
+                account_details = account_owner_map.get(account_id_key)
 
                 if account_details:
-                    matched_count += 1
+                    matched_owner_count += 1
                     account_number = account_details["Account Number"]
                     account_owner_from_map = account_details["Account owner"]
                 else:
-                    unmatched_count += 1
+                    unmatched_owner_count += 1
                     account_number = account_id_raw
-                    account_owner_from_map = "Not Found"
+                    account_owner_from_map = ""
 
                 account_owner_from_tags = get_tag_value(tag_dict, "BusinessUnitOwner")
 
-                if account_owner_from_map != "Not Found":
+                if account_owner_from_map:
                     final_account_owner = account_owner_from_map
                 elif account_owner_from_tags:
                     final_account_owner = account_owner_from_tags
                 else:
-                    final_account_owner = "Not Found"
+                    final_account_owner = ""
 
                 writer.writerow([
                     count,
@@ -843,8 +879,11 @@ def main():
 
     print(f"\nDone! Created {OUTPUT_FILE}")
     print(f"Total records written: {count - 1}")
-    print(f"Matched account records from AccountMap.csv: {matched_count}")
-    print(f"Unmatched account records from AccountMap.csv: {unmatched_count}")
+    print(f"Matched account owners from AccountMap.csv: {matched_owner_count}")
+    print(f"Unmatched account owners from AccountMap.csv: {unmatched_owner_count}")
+    print(f"Matched account names from account_names.csv: {matched_name_count}")
+    print(f"Fallback account names from project tag: {fallback_project_name_count}")
+    print(f"Unmatched account names: {unmatched_name_count}")
 
 
 if __name__ == "__main__":
