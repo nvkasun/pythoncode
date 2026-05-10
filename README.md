@@ -26,6 +26,19 @@ def clean_text(value):
     )
 
 
+def output_value(value):
+    """
+    Final CSV output formatter.
+    If value is blank, write '-'.
+    """
+    value = clean_text(value)
+
+    if not value:
+        return "-"
+
+    return value
+
+
 def normalize_header(value):
     return clean_text(value).lower().replace(" ", "").replace("_", "").replace("-", "")
 
@@ -147,11 +160,21 @@ def get_tag_value(tag_dict, key_name):
     return ""
 
 
-def extract_project_from_config_tag_list(config_dict):
+def extract_tag_from_config_tag_list(config_dict, key_name):
+    """
+    Generic extractor from configuration.tagList.
+
+    Example:
+      key_name = "project"          -> cdp-foundations-uat
+      key_name = "ApplicationName"  -> CDPFoundations
+    """
+
     tag_list = config_dict.get("tagList", [])
 
     if not isinstance(tag_list, list):
         return ""
+
+    key_name_lower = clean_text(key_name).lower()
 
     for tag in tag_list:
         if not isinstance(tag, dict):
@@ -160,22 +183,33 @@ def extract_project_from_config_tag_list(config_dict):
         key = clean_text(tag.get("key", ""))
         value = clean_text(tag.get("value", ""))
 
-        if key.lower() == "project" and value:
+        if key.lower() == key_name_lower and value:
             return value
 
     return ""
 
 
-def extract_project_from_raw_configuration(configuration_value):
+def extract_tag_from_raw_configuration(configuration_value, key_name):
+    """
+    Generic fallback extraction from raw configuration JSON text.
+
+    Handles:
+      {"value":"CDPFoundations","key":"ApplicationName"}
+      {"key":"ApplicationName","value":"CDPFoundations"}
+      {"tag":"ApplicationName=CDPFoundations","value":"CDPFoundations","key":"ApplicationName"}
+    """
+
     raw = clean_text(configuration_value)
 
     if not raw or raw == "-":
         return ""
 
     cleaned = raw.replace('\\"', '"')
+    key_name_escaped = re.escape(key_name)
 
+    # Case 1: "key":"ApplicationName" appears before "value":"..."
     match = re.search(
-        r'\{[^{}]*"key"\s*:\s*"project"[^{}]*"value"\s*:\s*"([^"]+)"[^{}]*\}',
+        rf'\{{[^{{}}]*"key"\s*:\s*"{key_name_escaped}"[^{{}}]*"value"\s*:\s*"([^"]+)"[^{{}}]*\}}',
         cleaned,
         re.IGNORECASE,
     )
@@ -183,8 +217,9 @@ def extract_project_from_raw_configuration(configuration_value):
     if match:
         return clean_text(match.group(1))
 
+    # Case 2: "value":"..." appears before "key":"ApplicationName"
     match = re.search(
-        r'\{[^{}]*"value"\s*:\s*"([^"]+)"[^{}]*"key"\s*:\s*"project"[^{}]*\}',
+        rf'\{{[^{{}}]*"value"\s*:\s*"([^"]+)"[^{{}}]*"key"\s*:\s*"{key_name_escaped}"[^{{}}]*\}}',
         cleaned,
         re.IGNORECASE,
     )
@@ -192,14 +227,44 @@ def extract_project_from_raw_configuration(configuration_value):
     if match:
         return clean_text(match.group(1))
 
+    # Case 3: tag format ApplicationName=value
     match = re.search(
-        r'"tag"\s*:\s*"project=([^"]+)"',
+        rf'"tag"\s*:\s*"{key_name_escaped}=([^"]+)"',
         cleaned,
         re.IGNORECASE,
     )
 
     if match:
         return clean_text(match.group(1))
+
+    return ""
+
+
+def decide_application(tag_dict, config_dict, configuration_value):
+    """
+    Application comes from ApplicationName tag.
+
+    Priority:
+      1. tags column -> ApplicationName
+      2. configuration.tagList -> ApplicationName
+      3. raw configuration JSON regex fallback -> ApplicationName
+      4. blank
+    """
+
+    application = get_tag_value(tag_dict, "ApplicationName")
+
+    if application:
+        return application
+
+    application = extract_tag_from_config_tag_list(config_dict, "ApplicationName")
+
+    if application:
+        return application
+
+    application = extract_tag_from_raw_configuration(configuration_value, "ApplicationName")
+
+    if application:
+        return application
 
     return ""
 
@@ -207,6 +272,7 @@ def extract_project_from_raw_configuration(configuration_value):
 def decide_account_name_from_project(tag_dict, config_dict, configuration_value):
     """
     Fallback account name from Results.csv project tag.
+
     Priority:
       1. tags column -> project
       2. configuration.tagList -> project
@@ -218,12 +284,12 @@ def decide_account_name_from_project(tag_dict, config_dict, configuration_value)
     if project:
         return project
 
-    project = extract_project_from_config_tag_list(config_dict)
+    project = extract_tag_from_config_tag_list(config_dict, "project")
 
     if project:
         return project
 
-    project = extract_project_from_raw_configuration(configuration_value)
+    project = extract_tag_from_raw_configuration(configuration_value, "project")
 
     if project:
         return project
@@ -770,6 +836,7 @@ def main():
             writer.writerow([
                 "Sl No",
                 "Env",
+                "Application",
                 "Account Name",
                 "Account Number",
                 "Account owner",
@@ -803,6 +870,7 @@ def main():
                 config_dict = parse_configuration(configuration_value)
 
                 env = decide_env(resource_name, tag_dict)
+                application = decide_application(tag_dict, config_dict, configuration_value)
 
                 # Account Name priority:
                 # 1. account_names.csv mapping
@@ -858,21 +926,22 @@ def main():
 
                 writer.writerow([
                     count,
-                    env,
-                    account_name,
-                    account_number,
-                    final_account_owner,
-                    db_type,
-                    db_identifier,
-                    engine,
-                    db_name,
-                    master_user,
-                    db_version,
-                    cloudwatch,
-                    backup_retention,
-                    maintenance_window,
-                    endpoint,
-                    port,
+                    output_value(env),
+                    output_value(application),
+                    output_value(account_name),
+                    output_value(account_number),
+                    output_value(final_account_owner),
+                    output_value(db_type),
+                    output_value(db_identifier),
+                    output_value(engine),
+                    output_value(db_name),
+                    output_value(master_user),
+                    output_value(db_version),
+                    output_value(cloudwatch),
+                    output_value(backup_retention),
+                    output_value(maintenance_window),
+                    output_value(endpoint),
+                    output_value(port),
                 ])
 
                 count += 1
