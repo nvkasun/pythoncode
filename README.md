@@ -1,43 +1,32 @@
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowUseApprovedRDSKMSKeysViaRDS",
-      "Effect": "Allow",
-      "Action": [
-        "kms:DescribeKey",
-        "kms:Decrypt",
-        "kms:GenerateDataKey",
-        "kms:GenerateDataKeyWithoutPlaintext",
-        "kms:CreateGrant",
-        "kms:ListGrants",
-        "kms:RevokeGrant"
-      ],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "kms:ViaService": "rds.eu-west-1.amazonaws.com",
-          "aws:ResourceTag/ApplicationName": "CloudFactory",
-          "aws:ResourceTag/Environment": "dev"
-        }
-      }
-    }
-  ]
-}
-
-
-
-{
-  "Sid": "AllowGitHubRunnerUseOfRDSKMSKeyViaRDS",
+  "Sid": "AllowTerraformRunnerUseOfRDSPerformanceInsightsKey",
   "Effect": "Allow",
   "Principal": {
-    "AWS": "arn:aws:iam::<ENGINEERING_ACCOUNT_ID>:role/<GITHUB_ACTIONS_RUNNER_ROLE_NAME>"
+    "AWS": "arn:aws:iam::668311713531:role/codebuild-aws-cloud-factory-infra_dev-service-role"
   },
   "Action": [
     "kms:DescribeKey",
+    "kms:Encrypt",
     "kms:Decrypt",
+    "kms:ReEncryptFrom",
+    "kms:ReEncryptTo",
     "kms:GenerateDataKey",
-    "kms:GenerateDataKeyWithoutPlaintext",
+    "kms:GenerateDataKeyWithoutPlaintext"
+  ],
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "kms:ViaService": "rds.eu-west-1.amazonaws.com"
+    }
+  }
+},
+{
+  "Sid": "AllowTerraformRunnerCreateGrantForRDS",
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::668311713531:role/codebuild-aws-cloud-factory-infra_dev-service-role"
+  },
+  "Action": [
     "kms:CreateGrant",
     "kms:ListGrants",
     "kms:RevokeGrant"
@@ -45,9 +34,10 @@
   "Resource": "*",
   "Condition": {
     "StringEquals": {
-      "kms:ViaService": "rds.eu-west-1.amazonaws.com",
-      "aws:ResourceTag/ApplicationName": "CloudFactory",
-      "aws:ResourceTag/Environment": "dev"
+      "kms:ViaService": "rds.eu-west-1.amazonaws.com"
+    },
+    "Bool": {
+      "kms:GrantIsForAWSResource": "true"
     }
   }
 }
