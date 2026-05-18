@@ -2,7 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowUseRDSPerformanceInsightsKMSKey",
+      "Sid": "AllowUseApprovedRDSKMSKeysViaRDS",
       "Effect": "Allow",
       "Action": [
         "kms:DescribeKey",
@@ -16,10 +16,12 @@
         "kms:ListGrants",
         "kms:RevokeGrant"
       ],
-      "Resource": "arn:aws:kms:eu-west-1:668311713531:key/d8c93bbf-5676-4da4-911a-30ae6a48782f",
+      "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "kms:ViaService": "rds.eu-west-1.amazonaws.com"
+          "kms:ViaService": "rds.eu-west-1.amazonaws.com",
+          "aws:ResourceTag/ApplicationName": "CloudFactory",
+          "aws:ResourceTag/Environment": "dev"
         }
       }
     }
