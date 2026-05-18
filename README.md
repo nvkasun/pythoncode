@@ -2,7 +2,7 @@
   "Sid": "AllowTerraformRunnerUseOfRDSPerformanceInsightsKey",
   "Effect": "Allow",
   "Principal": {
-    "AWS": "arn:aws:iam::668311713531:role/codebuild-aws-cloud-factory-infra_dev-service-role"
+    "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<RUNNER_ROLE_NAME>"
   },
   "Action": [
     "kms:DescribeKey",
@@ -24,7 +24,7 @@
   "Sid": "AllowTerraformRunnerCreateGrantForRDS",
   "Effect": "Allow",
   "Principal": {
-    "AWS": "arn:aws:iam::668311713531:role/codebuild-aws-cloud-factory-infra_dev-service-role"
+    "AWS": "arn:aws:iam::<ACCOUNT_ID>:role/<RUNNER_ROLE_NAME>"
   },
   "Action": [
     "kms:CreateGrant",
