@@ -1,113 +1,58 @@
-global:
-  environment: ""
-  deploymentId: ""
+{{- define "goldengate.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
-imagePullSecrets: []
+{{- define "goldengate.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
 
-source:
-  enabled: false
-  dbType: ""
+{{- define "goldengate.labels" -}}
+app.kubernetes.io/name: {{ include "goldengate.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+app.kubernetes.io/part-of: goldengate
+goldengate.oracle.com/environment: {{ .Values.global.environment | quote }}
+goldengate.oracle.com/deployment-id: {{ .Values.global.deploymentId | quote }}
+{{- end }}
 
-  image:
-    repository: ""
-    tag: ""
-    pullPolicy: IfNotPresent
+{{- define "goldengate.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "goldengate.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
 
-  ogg:
-    deploymentName: ""
-    domain: ""
-    adminUser: ""
-    adminPassword: ""
+{{- define "goldengate.sourceName" -}}
+{{- printf "%s-source" (include "goldengate.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
-  serviceAccount:
-    create: true
-    name: ""
-    annotations: {}
+{{- define "goldengate.targetName" -}}
+{{- printf "%s-target" (include "goldengate.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
-  ports:
-    http: 8080
-    https: 8443
-    distribution: 9013
-    metrics: 9015
+{{- define "goldengate.sourceSecretName" -}}
+{{- printf "%s-secret" (include "goldengate.sourceName" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
-  service:
-    type: ClusterIP
+{{- define "goldengate.targetSecretName" -}}
+{{- printf "%s-secret" (include "goldengate.targetName" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
-  persistence:
-    enabled: false
-    existingClaim: ""
-    createPV: false
-    createPVC: false
-    size: 20Gi
-    storageClassName: ""
-    accessModes:
-      - ReadWriteMany
-    nfs:
-      server: ""
-      path: ""
+{{- define "goldengate.sourceServiceAccountName" -}}
+{{- if .Values.source.serviceAccount.create }}
+{{- default (include "goldengate.sourceName" .) .Values.source.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.source.serviceAccount.name }}
+{{- end }}
+{{- end }}
 
-  resources: {}
-
-  extraEnv: []
-  extraVolumeMounts: []
-  extraVolumes: []
-  extraContainers: []
-
-target:
-  enabled: false
-  dbType: ""
-
-  image:
-    repository: ""
-    tag: ""
-    pullPolicy: IfNotPresent
-
-  ogg:
-    deploymentName: ""
-    domain: ""
-    adminUser: ""
-    adminPassword: ""
-
-  serviceAccount:
-    create: true
-    name: ""
-    annotations: {}
-
-  ports:
-    http: 8080
-    https: 8443
-    receiver: 9014
-    metrics: 9015
-
-  service:
-    type: ClusterIP
-
-  persistence:
-    enabled: false
-    existingClaim: ""
-    createPV: false
-    createPVC: false
-    size: 20Gi
-    storageClassName: ""
-    accessModes:
-      - ReadWriteMany
-    nfs:
-      server: ""
-      path: ""
-
-  resources: {}
-
-  extraEnv: []
-  extraVolumeMounts: []
-  extraVolumes: []
-  extraContainers: []
-
-podSecurityContext: {}
-
-securityContext: {}
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
+{{- define "goldengate.targetServiceAccountName" -}}
+{{- if .Values.target.serviceAccount.create }}
+{{- default (include "goldengate.targetName" .) .Values.target.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.target.serviceAccount.name }}
+{{- end }}
+{{- end }}
