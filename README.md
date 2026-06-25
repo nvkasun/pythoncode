@@ -32,7 +32,7 @@ env:
   HELM_OCI_NAMESPACE: helm
   CHART_NAME: goldengate
   HELM_CHART_PATH: helm/goldengate
-  DEPLOYMENTS_ROOT: deployments
+  ENVS_ROOT: envs
 
 concurrency:
   group: goldengate-helm-publish-${{ github.ref }}-${{ inputs.environment }}-${{ inputs.deployment_id }}
@@ -62,28 +62,29 @@ jobs:
           ENVIRONMENT="${{ inputs.environment }}"
           DEPLOYMENT_ID="${{ inputs.deployment_id }}"
 
-          # Kubernetes-safe name validation.
-          # Lowercase letters, numbers and hyphens only.
+          # Kubernetes-safe deployment ID validation.
+          # Allowed: lowercase letters, numbers, and hyphens.
           if [[ ! "$DEPLOYMENT_ID" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
             echo "Invalid deployment_id: $DEPLOYMENT_ID"
-            echo "Use lowercase letters, numbers and hyphens only."
+            echo "Use lowercase letters, numbers, and hyphens only."
             echo "Example: payments-ora-to-pg-001"
             exit 1
           fi
 
           NAMESPACE="gg-${ENVIRONMENT}-${DEPLOYMENT_ID}"
           RELEASE_NAME="ogg-${DEPLOYMENT_ID}"
-          VALUES_FILE="${DEPLOYMENTS_ROOT}/${ENVIRONMENT}/${DEPLOYMENT_ID}/values.yaml"
+          VALUES_FILE="${ENVS_ROOT}/${ENVIRONMENT}/${DEPLOYMENT_ID}/values.yaml"
 
           if [ ${#NAMESPACE} -gt 63 ]; then
             echo "Namespace is too long: $NAMESPACE"
             echo "Kubernetes namespace names must be 63 characters or less."
+            echo "Please shorten deployment_id."
             exit 1
           fi
 
           if [ ${#RELEASE_NAME} -gt 53 ]; then
             echo "Helm release name is too long: $RELEASE_NAME"
-            echo "Please shorten deployment_id."
+            echo "Please shorten deployment_id because resource names add -source and -target suffixes."
             exit 1
           fi
 
@@ -127,7 +128,7 @@ jobs:
 
           if [ ! -f "$VALUES_FILE" ]; then
             echo "Missing deployment values file: $VALUES_FILE"
-            echo "Create: deployments/${ENVIRONMENT}/${DEPLOYMENT_ID}/values.yaml"
+            echo "Create: envs/${ENVIRONMENT}/${DEPLOYMENT_ID}/values.yaml"
             exit 1
           fi
 
@@ -222,7 +223,7 @@ jobs:
           {
             echo "## GoldenGate EKS Helm Publish Summary"
             echo ""
-            echo "### Deployment"
+            echo "### Deployment details"
             echo ""
             echo "- Environment: \`${ENVIRONMENT}\`"
             echo "- Deployment ID: \`${DEPLOYMENT_ID}\`"
