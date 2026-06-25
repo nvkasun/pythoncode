@@ -1,23 +1,23 @@
 global:
-  environment: dev
+  environment: ""
   deploymentId: ""
 
 imagePullSecrets: []
 
 source:
-  enabled: true
-  dbType: oracle
+  enabled: false
+  dbType: ""
 
   image:
-    repository: 229410149234.dkr.ecr.eu-west-1.amazonaws.com/ogg-oracle
-    tag: "23.26.2.0.2"
+    repository: ""
+    tag: ""
     pullPolicy: IfNotPresent
 
   ogg:
-    deploymentName: OracleSource
-    domain: source.goldengate.local
-    adminUser: ggadmin
-    adminPassword: change-me
+    deploymentName: ""
+    domain: ""
+    adminUser: ""
+    adminPassword: ""
 
   serviceAccount:
     create: true
@@ -46,32 +46,27 @@ source:
       server: ""
       path: ""
 
-  resources:
-    requests:
-      cpu: 500m
-      memory: 1Gi
-    limits:
-      cpu: "2"
-      memory: 4Gi
+  resources: {}
 
   extraEnv: []
   extraVolumeMounts: []
+  extraVolumes: []
   extraContainers: []
 
 target:
-  enabled: true
-  dbType: postgresql
+  enabled: false
+  dbType: ""
 
   image:
-    repository: 229410149234.dkr.ecr.eu-west-1.amazonaws.com/ogg-postgresql
-    tag: "23.26.2.0.1"
+    repository: ""
+    tag: ""
     pullPolicy: IfNotPresent
 
   ogg:
-    deploymentName: PostgresTarget
-    domain: target.goldengate.local
-    adminUser: ggadmin
-    adminPassword: change-me
+    deploymentName: ""
+    domain: ""
+    adminUser: ""
+    adminPassword: ""
 
   serviceAccount:
     create: true
@@ -100,16 +95,11 @@ target:
       server: ""
       path: ""
 
-  resources:
-    requests:
-      cpu: 500m
-      memory: 1Gi
-    limits:
-      cpu: "2"
-      memory: 4Gi
+  resources: {}
 
   extraEnv: []
   extraVolumeMounts: []
+  extraVolumes: []
   extraContainers: []
 
 podSecurityContext: {}
